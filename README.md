@@ -1,2 +1,3 @@
-# Zoodist
-Mix between Pomofocus and moodist
+# YOEO
+
+You only eat once
