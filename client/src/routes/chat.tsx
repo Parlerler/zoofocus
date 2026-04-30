@@ -4,7 +4,11 @@ import { ArrowUp, Plus, Sliders } from "lucide-react";
 import { AppShell } from "@/components/sokt/AppShell";
 import { ModelControls } from "@/components/sokt/ModelControls";
 import { HistorySidebar } from "@/components/sokt/HistorySidebar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export const Route = createFileRoute("/chat")({
   component: ChatPage,
@@ -14,10 +18,14 @@ export const Route = createFileRoute("/chat")({
 type Msg = { role: "user" | "assistant"; content: string };
 
 const PROMPT_SNIPPETS: Record<string, string> = {
-  "sys:coder": "You are an expert software engineer. Write concise, idiomatic code with brief explanations.",
-  "sys:cp": "You are a competitive programming coach. Explain algorithms, complexity, and edge cases.",
-  "sys:designer": "You are a senior product designer. Critique with focus on hierarchy, contrast, and intent.",
-  "sys:study": "You are a patient tutor. Explain step by step using analogies and quick checks for understanding.",
+  "sys:coder":
+    "You are an expert software engineer. Write concise, idiomatic code with brief explanations.",
+  "sys:cp":
+    "You are a competitive programming coach. Explain algorithms, complexity, and edge cases.",
+  "sys:designer":
+    "You are a senior product designer. Critique with focus on hierarchy, contrast, and intent.",
+  "sys:study":
+    "You are a patient tutor. Explain step by step using analogies and quick checks for understanding.",
 };
 
 function ChatPage() {
@@ -30,26 +38,89 @@ function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages]);
 
   const expandSnippet = (text: string) =>
-    text.replace(/sys:(coder|cp|designer|study)/g, (m) => PROMPT_SNIPPETS[m] ?? m);
+    text.replace(
+      /sys:(coder|cp|designer|study)/g,
+      (m) => PROMPT_SNIPPETS[m] ?? m,
+    );
 
-  const send = () => {
+  const send = async () => {
     const v = input.trim();
     if (!v) return;
-    setMessages((m) => [...m, { role: "user", content: expandSnippet(v) }]);
+
+    const fullMessage = expandSnippet(v);
+
+    // 1. Add user message to UI immediately
+    setMessages((m) => [...m, { role: "user", content: fullMessage }]);
     setInput("");
     setBusy(true);
-    setTimeout(() => {
+
+    // We need to keep track of the entire conversation history to send to Ollama.
+    // Ollama needs the context of previous messages to remember the chat!
+    const chatHistory = [...messages, { role: "user", content: fullMessage }];
+
+    try {
+      // 2. Call your FastAPI backend
+      const res = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama3.2:3b", // Replace this with your actual selected model state!
+          messages: chatHistory,
+        }),
+      });
+
+      if (!res.body) throw new Error("No response body");
+
+      // 3. Prepare an empty assistant message in the UI that we will fill up
+      setMessages((m) => [...m, { role: "assistant", content: "" }]);
+
+      // 4. Read the stream
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n").filter((l) => l.startsWith("data: "));
+
+        for (const line of lines) {
+          try {
+            const { token } = JSON.parse(line.slice(6));
+
+            // 5. Update the LAST message in the array with the new token
+            setMessages((prev) => {
+              const newMessages = [...prev];
+              const lastIndex = newMessages.length - 1;
+              newMessages[lastIndex] = {
+                ...newMessages[lastIndex],
+                content: newMessages[lastIndex].content + token,
+              };
+              return newMessages;
+            });
+          } catch (e) {
+            // Ignore incomplete JSON chunks
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Chat error:", err);
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: "Connect SOKT backend (FastAPI + Ollama) to stream a real response." },
+        { role: "assistant", content: "Error connecting to backend." },
       ]);
+    } finally {
       setBusy(false);
-    }, 1000);
-    taRef.current?.focus();
+      taRef.current?.focus();
+    }
   };
 
   const empty = messages.length === 0;
@@ -74,14 +145,23 @@ function ChatPage() {
         <div className="flex-1 flex flex-col min-w-0 relative">
           {empty ? (
             <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[18vh]">
-              <div key={temporary ? "temp" : "normal"} className="text-center mb-6 animate-float-up">
+              <div
+                key={temporary ? "temp" : "normal"}
+                className="text-center mb-6 animate-float-up"
+              >
                 {temporary ? (
                   <>
-                    <h1 className="text-2xl md:text-3xl font-medium">Temporary Chat</h1>
-                    <p className="mt-2 text-sm text-muted-foreground">This chat won't appear in your chat history.</p>
+                    <h1 className="text-2xl md:text-3xl font-medium">
+                      Temporary Chat
+                    </h1>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      This chat won't appear in your chat history.
+                    </p>
                   </>
                 ) : (
-                  <h1 className="text-2xl md:text-3xl font-medium">What can I help with?</h1>
+                  <h1 className="text-2xl md:text-3xl font-medium">
+                    What can I help with?
+                  </h1>
                 )}
               </div>
               <div className="w-full max-w-2xl">
@@ -91,15 +171,23 @@ function ChatPage() {
                   send={send}
                   taRef={taRef}
                 />
-                <SnippetHints onPick={(s) => setInput((t) => (t ? t + " " + s : s + " "))} />
+                <SnippetHints
+                  onPick={(s) => setInput((t) => (t ? t + " " + s : s + " "))}
+                />
               </div>
             </div>
           ) : (
             <>
-              <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
+              <div
+                ref={scrollRef}
+                className="flex-1 overflow-y-auto scrollbar-thin"
+              >
                 <div className="px-4 md:px-8 py-8 max-w-3xl mx-auto w-full space-y-4">
                   {messages.map((m, i) => (
-                    <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div
+                      key={i}
+                      className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                    >
                       <div
                         className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
                           m.role === "user"
@@ -112,7 +200,9 @@ function ChatPage() {
                     </div>
                   ))}
                   {busy && (
-                    <div className="text-xs text-muted-foreground">thinking…</div>
+                    <div className="text-xs text-muted-foreground">
+                      thinking…
+                    </div>
                   )}
                 </div>
               </div>
@@ -135,7 +225,10 @@ function ChatPage() {
 }
 
 function Composer({
-  input, setInput, send, taRef,
+  input,
+  setInput,
+  send,
+  taRef,
 }: {
   input: string;
   setInput: (s: string) => void;
@@ -171,7 +264,11 @@ function Composer({
         >
           <Sliders className="h-4 w-4" />
         </PopoverTrigger>
-        <PopoverContent side="top" align="end" className="w-[420px] p-0 border-border/60 bg-popover">
+        <PopoverContent
+          side="top"
+          align="end"
+          className="w-[420px] p-0 border-border/60 bg-popover"
+        >
           <ModelControls />
         </PopoverContent>
       </Popover>
@@ -189,7 +286,9 @@ function Composer({
 function SnippetHints({ onPick }: { onPick: (s: string) => void }) {
   return (
     <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
-      <span className="font-mono text-[10px] tracking-widest text-muted-foreground mr-1">SNIPPETS</span>
+      <span className="font-mono text-[10px] tracking-widest text-muted-foreground mr-1">
+        SNIPPETS
+      </span>
       {Object.keys(PROMPT_SNIPPETS).map((s) => (
         <button
           key={s}
