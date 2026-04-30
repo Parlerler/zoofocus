@@ -1,0 +1,71 @@
+# =========================
+# Python / FastAPI
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Env files
+.env
+.env.*
+*.env
+
+# Python tooling
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Logs
+*.log
+
+# =========================
+# Node / React
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+
+# Vite
+.vite/
+
+# React / frontend env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# =========================
+# General
+# =========================
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+
+# =========================
+# Optional (if needed)
+# =========================
+# SQLite DB (if using local dev DB)
+*.db
+
+# Uploads / temp files
+uploads/
+tmp/
