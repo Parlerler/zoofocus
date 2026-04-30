@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useRef } from "react";
 import { AppShell } from "@/components/sokt/AppShell";
-import { Mic, Square, Upload, Play, Volume2, Wand2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { Mic, Square, Upload, Play, Volume2, Download, AlertCircle } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 
 export const Route = createFileRoute("/audio")({
   component: AudioPage,
@@ -14,6 +14,28 @@ const tabs = [
   { id: "stt", label: "Speech → Text" },
   { id: "tts", label: "Text → Speech" },
 ] as const;
+
+// ─── Pocket TTS constants ────────────────────────────────────────────────────
+
+const POCKET_TTS_VOICES = [
+  "alba", "anna", "azelma", "bill_boerst", "caro_davy", "charles",
+  "cosette", "eponine", "eve", "fantine", "george", "jane", "jean",
+  "javert", "marius", "mary", "michael", "paul", "peter_yearsley",
+  "stuart_bell", "vera",
+] as const;
+
+const POCKET_TTS_LANGUAGES = [
+  { value: "english",        label: "English (default)" },
+  { value: "english_2026-01", label: "English 2026-01" },
+  { value: "english_2026-04", label: "English 2026-04" },
+  { value: "french_24l",     label: "French" },
+  { value: "german_24l",     label: "German" },
+  { value: "portuguese_24l", label: "Portuguese" },
+  { value: "italian_24l",    label: "Italian" },
+  { value: "spanish_24l",    label: "Spanish" },
+] as const;
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 function AudioPage() {
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("stt");
@@ -44,6 +66,8 @@ function AudioPage() {
     </AppShell>
   );
 }
+
+// ─── STT Panel (unchanged) ───────────────────────────────────────────────────
 
 function STTPanel({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => void }) {
   const [recording, setRecording] = useState(false);
@@ -94,51 +118,107 @@ function STTPanel({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => v
   );
 }
 
+// ─── TTS Panel ───────────────────────────────────────────────────────────────
+
 function TTSPanel({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => void }) {
   const [text, setText] = useState("");
-  const [voice, setVoice] = useState("Aria");
-  const [model, setModel] = useState("coqui/XTTS-v2");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [voice, setVoice] = useState<string>(POCKET_TTS_VOICES[0]);
+  const [language, setLanguage] = useState(POCKET_TTS_LANGUAGES[0].value);
+  const [serverUrl, setServerUrl] = useState("http://localhost:8000");
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
-  const voices = ["Aria", "Liam", "Sora", "Atlas", "Nova"];
-  const models = ["coqui/XTTS-v2", "suno/bark", "kokoro/kokoro-82M"];
+  const synth = async () => {
+    if (!text.trim() || busy) return;
 
-  const synth = () => {
-    if (!text.trim()) return;
+    // Revoke previous blob URL to free memory
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    setAudioUrl(null);
+    setError(null);
     setBusy(true);
-    setTimeout(() => setBusy(false), 1200);
+
+    try {
+      const form = new FormData();
+      form.append("text", text.trim());
+      form.append("voice", voice);
+
+      const res = await fetch(`${serverUrl.replace(/\/$/, "")}/tts`, {
+        method: "POST",
+        body: form,
+      });
+
+      if (!res.ok) {
+        const msg = await res.text().catch(() => res.statusText);
+        throw new Error(`Server returned ${res.status}: ${msg}`);
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+
+      // Auto-play once src is set (the useEffect on audioRef handles this,
+      // but we can also trigger play directly after the element updates).
+      // We use setTimeout(0) to let React flush the audio src update first.
+      setTimeout(() => audioRef.current?.play(), 0);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg.includes("Failed to fetch")
+        ? `Cannot reach pocket-tts server at ${serverUrl}. Make sure it's running:\n  pocket-tts serve --language ${language}`
+        : msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const download = () => {
+    if (!audioUrl) return;
+    const a = document.createElement("a");
+    a.href = audioUrl;
+    a.download = `tts-${voice}-${Date.now()}.wav`;
+    a.click();
   };
 
   return (
     <div className="space-y-4">
+      {/* Server URL */}
+      <Field label="Server URL">
+        <Input
+          value={serverUrl}
+          onChange={(e) => setServerUrl(e.target.value)}
+          className="h-9 font-mono text-sm bg-secondary/40 border-border/50"
+          placeholder="http://localhost:8000"
+        />
+      </Field>
+
+      {/* Language model + Voice */}
       <div className="grid md:grid-cols-2 gap-3">
-        <Field label="Model">
-          <Select value={model} onChange={setModel} options={models} />
+        <Field label="Language model">
+          <Select
+            value={language}
+            onChange={setLanguage}
+            options={POCKET_TTS_LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
+          />
         </Field>
         <Field label="Voice">
-          <Select value={voice} onChange={setVoice} options={voices} />
+          <Select
+            value={voice}
+            onChange={setVoice}
+            options={POCKET_TTS_VOICES.map((v) => ({ value: v, label: v }))}
+          />
         </Field>
       </div>
 
-      <div className="rounded-2xl border border-dashed border-border/60 bg-card/30 p-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-lg border border-border bg-secondary/50 flex items-center justify-center text-primary">
-            <Wand2 className="h-4 w-4" />
-          </div>
-          <div>
-            <div className="text-sm font-medium">Clone a voice</div>
-            <div className="text-xs text-muted-foreground">Drop a 6-second clean sample.</div>
-          </div>
-        </div>
-        <input ref={fileRef} type="file" accept="audio/*" className="hidden" />
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="text-xs rounded-md border border-border/60 bg-secondary/40 px-3 py-1.5 hover:border-primary/40 hover:text-primary cursor-pointer"
-        >
-          Upload sample
-        </button>
+      {/* Language model hint */}
+      <div className="flex items-start gap-2 rounded-lg border border-border/40 bg-card/20 px-3 py-2.5 text-xs text-muted-foreground">
+        <span className="font-mono text-primary shrink-0">$</span>
+        <span>
+          pocket-tts serve{language !== "english" ? ` --language ${language}` : ""}
+          <span className="ml-2 opacity-50"># restart server to switch language</span>
+        </span>
       </div>
 
+      {/* Text input */}
       <Textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -146,21 +226,44 @@ function TTSPanel({ busy, setBusy }: { busy: boolean; setBusy: (b: boolean) => v
         className="min-h-[140px] bg-secondary/30 border-border/50"
       />
 
+      {/* Error */}
+      {error && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-xs text-destructive whitespace-pre-wrap">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {/* Audio player */}
+      {audioUrl && (
+        <div className="rounded-xl border border-border/50 bg-card/40 px-4 py-3 flex items-center gap-3">
+          <Volume2 className="h-4 w-4 text-primary shrink-0" />
+          <audio ref={audioRef} src={audioUrl} controls className="flex-1 h-8" />
+          <button
+            onClick={download}
+            className="inline-flex items-center gap-1 text-xs h-8 px-2.5 rounded-md border border-border/50 bg-card/40 hover:border-primary/40 hover:text-primary cursor-pointer transition-colors shrink-0"
+          >
+            <Download className="h-3.5 w-3.5" /> Save
+          </button>
+        </div>
+      )}
+
+      {/* Actions */}
       <div className="flex items-center gap-2">
         <button
           onClick={synth}
           disabled={busy || !text.trim()}
           className="inline-flex items-center gap-2 rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
-          <Play className="h-4 w-4" /> {busy ? "Generating…" : "Speak"}
-        </button>
-        <button className="inline-flex items-center gap-2 rounded-md border border-border/60 bg-card/40 px-3 py-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer">
-          <Volume2 className="h-3.5 w-3.5" /> Preview voice
+          <Play className="h-4 w-4" />
+          {busy ? "Generating…" : "Speak"}
         </button>
       </div>
     </div>
   );
 }
+
+// ─── Shared helpers ──────────────────────────────────────────────────────────
 
 function ModelRow({ label, value }: { label: string; value: string }) {
   return (
@@ -180,7 +283,15 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Select({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: string[] }) {
+function Select({
+  value,
+  onChange,
+  options,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
   return (
     <div className="relative">
       <select
@@ -188,7 +299,11 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
         onChange={(e) => onChange(e.target.value)}
         className="w-full appearance-none rounded-md border border-border/60 bg-secondary/30 px-3 py-2 text-sm font-mono focus:border-primary/40 focus:outline-none"
       >
-        {options.map((o) => <option key={o}>{o}</option>)}
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
       </select>
     </div>
   );
