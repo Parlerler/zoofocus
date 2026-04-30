@@ -1,3 +1,3 @@
-# YOEO
+# SOKT
 
-You only eat once
+You only SOKT once
