@@ -9,6 +9,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 export const Route = createFileRoute("/chat")({
   component: ChatPage,
@@ -195,7 +198,43 @@ function ChatPage() {
                             : "bg-card border border-border/50"
                         }`}
                       >
-                        {m.content}
+                        <ReactMarkdown
+                          components={{
+                            code(props) {
+                              const {
+                                children,
+                                className,
+                                node,
+                                ref,
+                                ...rest
+                              } = props;
+                              const match = /language-(\w+)/.exec(
+                                className || "",
+                              );
+
+                              return match ? (
+                                <SyntaxHighlighter
+                                  {...rest}
+                                  PreTag="div"
+                                  language={match[1]}
+                                  style={vscDarkPlus}
+                                  className="rounded-md border border-border/50 text-xs my-2 !bg-background/50"
+                                >
+                                  {String(children).replace(/\n$/, "")}
+                                </SyntaxHighlighter>
+                              ) : (
+                                <code
+                                  {...rest}
+                                  className="bg-background/50 rounded px-1.5 py-0.5 text-primary"
+                                >
+                                  {children}
+                                </code>
+                              );
+                            },
+                          }}
+                        >
+                          {m.content}
+                        </ReactMarkdown>
                       </div>
                     </div>
                   ))}
