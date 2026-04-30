@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Backend Test</title>
+  <style>
+    body { font-family: monospace; padding: 2rem; background: #111; color: #eee; }
+    button { padding: 0.5rem 1rem; margin: 0.5rem; cursor: pointer; }
+    pre { background: #222; padding: 1rem; border-radius: 8px; white-space: pre-wrap; }
+    input, select { padding: 0.5rem; margin: 0.5rem; width: 300px; }
+  </style>
+</head>
+<body>
+
+  <h2>1. Available Models</h2>
+  <button onclick="getAvailable()">GET /api/models/available</button>
+  <pre id="available">...</pre>
+
+  <h2>2. Installed Models</h2>
+  <button onclick="getInstalled()">GET /api/models/installed</button>
+  <pre id="installed">...</pre>
+
+  <h2>3. Chat (streaming)</h2>
+  <input id="chatInput" placeholder="Type a message..." />
+  <select id="modelSelect">
+    <option value="llama3.2:3b">llama3.2:3b</option>
+    <option value="mistral:7b">mistral:7b</option>
+  </select>
+  <button onclick="sendChat()">POST /api/chat</button>
+  <pre id="chatOutput">...</pre>
+
+  <script>
+    const BASE = "http://localhost:8000"
+
+    async function getAvailable() {
+      const res = await fetch(`${BASE}/api/models/available`)
+      const data = await res.json()
+      document.getElementById("available").textContent = JSON.stringify(data, null, 2)
+    }
+
+    async function getInstalled() {
+      const res = await fetch(`${BASE}/api/models/installed`)
+      const data = await res.json()
+      document.getElementById("installed").textContent = JSON.stringify(data, null, 2)
+    }
+
+    async function sendChat() {
+      const input = document.getElementById("chatInput").value
+      const model = document.getElementById("modelSelect").value
+      const output = document.getElementById("chatOutput")
+      output.textContent = ""
+
+      const res = await fetch(`${BASE}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: "user", content: input }]
+        })
+      })
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value)
+        const lines = chunk.split("\n").filter(l => l.startsWith("data: "))
+        for (const line of lines) {
+          const { token } = JSON.parse(line.slice(6))
+          output.textContent += token
+        }
+      }
+    }
+  </script>
+
+</body>
+</html>
