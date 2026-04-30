@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AppShell } from "@/components/sokt/AppShell";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,17 +12,43 @@ export const Route = createFileRoute("/prompts")({
 
 type Snippet = { id: string; key: string; title: string; body: string };
 
-const initial: Snippet[] = [
+const STORAGE_KEY = "sokt:prompt-snippets";
+
+const defaults: Snippet[] = [
   { id: "1", key: "sys:coder", title: "Coder", body: "You are an expert software engineer. Write concise, idiomatic code with brief explanations." },
   { id: "2", key: "sys:cp", title: "Competitive programming", body: "You are a competitive programming coach. Explain algorithms, complexity, and edge cases." },
   { id: "3", key: "sys:designer", title: "Designer", body: "You are a senior product designer. Critique with focus on hierarchy, contrast, and intent." },
   { id: "4", key: "sys:study", title: "Study tutor", body: "You are a patient tutor. Explain step by step using analogies and quick checks for understanding." },
 ];
 
+function loadSnippets(): Snippet[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Snippet[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // corrupted storage — fall through to defaults
+  }
+  return defaults;
+}
+
 function PromptLab() {
-  const [snips, setSnips] = useState<Snippet[]>(initial);
-  const [activeId, setActiveId] = useState(initial[0].id);
-  const active = snips.find((s) => s.id === activeId)!;
+  const [snips, setSnips] = useState<Snippet[]>(loadSnippets);
+  const [activeId, setActiveId] = useState(() => loadSnippets()[0]?.id ?? "");
+  const [copied, setCopied] = useState(false);
+
+  // Persist to localStorage whenever snippets change
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snips));
+    } catch {
+      // storage quota exceeded — silently ignore
+    }
+  }, [snips]);
+
+  const active = snips.find((s) => s.id === activeId);
 
   const update = (patch: Partial<Snippet>) =>
     setSnips((arr) => arr.map((s) => (s.id === activeId ? { ...s, ...patch } : s)));
@@ -35,8 +61,19 @@ function PromptLab() {
   };
 
   const remove = (id: string) => {
-    setSnips((arr) => arr.filter((s) => s.id !== id));
-    if (id === activeId && snips[0]) setActiveId(snips.find((s) => s.id !== id)?.id ?? "");
+    const remaining = snips.filter((s) => s.id !== id);
+    setSnips(remaining);
+    if (id === activeId) {
+      setActiveId(remaining[0]?.id ?? "");
+    }
+  };
+
+  const copy = () => {
+    if (!active) return;
+    navigator.clipboard?.writeText(active.body).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
   };
 
   return (
@@ -67,6 +104,9 @@ function PromptLab() {
                 <div className="text-xs truncate">{s.title}</div>
               </button>
             ))}
+            {snips.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-6">No snippets yet. Hit New to create one.</p>
+            )}
           </div>
         </aside>
 
@@ -78,7 +118,7 @@ function PromptLab() {
               Define a snippet like <span className="font-mono text-primary">sys:coder</span>, then drop it into any chat to load that persona.
             </p>
 
-            {active && (
+            {active ? (
               <div className="space-y-4 rounded-2xl border border-border/60 bg-card/40 p-5">
                 <div className="grid grid-cols-[1fr_2fr] gap-3">
                   <Field label="Trigger">
@@ -111,19 +151,24 @@ function PromptLab() {
                   </div>
                   <div className="flex gap-1.5">
                     <button
-                      onClick={() => navigator.clipboard?.writeText(active.body)}
-                      className="inline-flex items-center gap-1 text-xs h-8 px-2.5 rounded-md border border-border/50 bg-card/40 hover:border-primary/40 cursor-pointer"
+                      onClick={copy}
+                      className="inline-flex items-center gap-1 text-xs h-8 px-2.5 rounded-md border border-border/50 bg-card/40 hover:border-primary/40 cursor-pointer transition-colors"
                     >
-                      <Copy className="h-3.5 w-3.5" /> Copy
+                      <Copy className="h-3.5 w-3.5" />
+                      {copied ? "Copied!" : "Copy"}
                     </button>
                     <button
                       onClick={() => remove(active.id)}
-                      className="inline-flex items-center gap-1 text-xs h-8 px-2.5 rounded-md border border-border/50 bg-card/40 hover:border-destructive/50 hover:text-destructive cursor-pointer"
+                      className="inline-flex items-center gap-1 text-xs h-8 px-2.5 rounded-md border border-border/50 bg-card/40 hover:border-destructive/50 hover:text-destructive cursor-pointer transition-colors"
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   </div>
                 </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border/50 p-10 text-center text-sm text-muted-foreground">
+                Select a snippet from the sidebar or create a new one.
               </div>
             )}
           </div>
