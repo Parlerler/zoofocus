@@ -20,17 +20,24 @@ export const Route = createFileRoute("/chat")({
 });
 
 type Msg = { role: "user" | "assistant"; content: string };
+type Snippet = { id: string; key: string; title: string; body: string };
 
-const PROMPT_SNIPPETS: Record<string, string> = {
-  "sys:coder":
-    "You are an expert software engineer. Write concise, idiomatic code with brief explanations.",
-  "sys:cp":
-    "You are a competitive programming coach. Explain algorithms, complexity, and edge cases.",
-  "sys:designer":
-    "You are a senior product designer. Critique with focus on hierarchy, contrast, and intent.",
-  "sys:study":
-    "You are a patient tutor. Explain step by step using analogies and quick checks for understanding.",
-};
+const STORAGE_KEY = "sokt:prompt-snippets";
+
+function loadSnippets(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Snippet[];
+      if (Array.isArray(parsed)) {
+        return Object.fromEntries(parsed.map((s) => [s.key, s.body]));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
 
 function ChatPage() {
   const { activeModel } = useModel();
@@ -39,6 +46,11 @@ function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [temporary, setTemporary] = useState(false);
+
+  // Read snippets fresh from localStorage each render so changes in
+  // Prompt Lab are reflected without needing a page reload.
+  const snippets = loadSnippets();
+
   const taRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -50,10 +62,7 @@ function ChatPage() {
   }, [messages]);
 
   const expandSnippet = (text: string) =>
-    text.replace(
-      /sys:(coder|cp|designer|study)/g,
-      (m) => PROMPT_SNIPPETS[m] ?? m,
-    );
+    text.replace(/\S+/g, (word) => snippets[word] ?? word);
 
   const send = async () => {
     const v = input.trim();
@@ -61,17 +70,13 @@ function ChatPage() {
 
     const fullMessage = expandSnippet(v);
 
-    // 1. Add user message to UI immediately
     setMessages((m) => [...m, { role: "user", content: fullMessage }]);
     setInput("");
     setBusy(true);
 
-    // We need to keep track of the entire conversation history to send to Ollama.
-    // Ollama needs the context of previous messages to remember the chat!
     const chatHistory = [...messages, { role: "user", content: fullMessage }];
 
     try {
-      // 2. Call your FastAPI backend
       const res = await fetch("http://localhost:8000/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,10 +88,8 @@ function ChatPage() {
 
       if (!res.body) throw new Error("No response body");
 
-      // 3. Prepare an empty assistant message in the UI that we will fill up
       setMessages((m) => [...m, { role: "assistant", content: "" }]);
 
-      // 4. Read the stream
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
@@ -100,19 +103,14 @@ function ChatPage() {
         for (const line of lines) {
           try {
             const { token } = JSON.parse(line.slice(6));
-
-            // 5. Update the LAST message in the array with the new token
             setMessages((prev) => {
-              const newMessages = [...prev];
-              const lastIndex = newMessages.length - 1;
-              newMessages[lastIndex] = {
-                ...newMessages[lastIndex],
-                content: newMessages[lastIndex].content + token,
-              };
-              return newMessages;
+              const next = [...prev];
+              const last = next.length - 1;
+              next[last] = { ...next[last], content: next[last].content + token };
+              return next;
             });
-          } catch (e) {
-            // Ignore incomplete JSON chunks
+          } catch {
+            // ignore incomplete JSON chunks
           }
         }
       }
@@ -177,16 +175,14 @@ function ChatPage() {
                   taRef={taRef}
                 />
                 <SnippetHints
+                  snippets={snippets}
                   onPick={(s) => setInput((t) => (t ? t + " " + s : s + " "))}
                 />
               </div>
             </div>
           ) : (
             <>
-              <div
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto scrollbar-thin"
-              >
+              <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
                 <div className="px-4 md:px-8 py-8 max-w-3xl mx-auto w-full space-y-4">
                   {messages.map((m, i) => (
                     <div
@@ -203,17 +199,8 @@ function ChatPage() {
                         <ReactMarkdown
                           components={{
                             code(props) {
-                              const {
-                                children,
-                                className,
-                                node,
-                                ref,
-                                ...rest
-                              } = props;
-                              const match = /language-(\w+)/.exec(
-                                className || "",
-                              );
-
+                              const { children, className, node, ref, ...rest } = props;
+                              const match = /language-(\w+)/.exec(className || "");
                               return match ? (
                                 <SyntaxHighlighter
                                   {...rest}
@@ -241,9 +228,7 @@ function ChatPage() {
                     </div>
                   ))}
                   {busy && (
-                    <div className="text-xs text-muted-foreground">
-                      thinking…
-                    </div>
+                    <div className="text-xs text-muted-foreground">thinking…</div>
                   )}
                 </div>
               </div>
@@ -324,13 +309,22 @@ function Composer({
   );
 }
 
-function SnippetHints({ onPick }: { onPick: (s: string) => void }) {
+function SnippetHints({
+  snippets,
+  onPick,
+}: {
+  snippets: Record<string, string>;
+  onPick: (s: string) => void;
+}) {
+  const keys = Object.keys(snippets);
+  if (keys.length === 0) return null;
+
   return (
     <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
       <span className="font-mono text-[10px] tracking-widest text-muted-foreground mr-1">
         SNIPPETS
       </span>
-      {Object.keys(PROMPT_SNIPPETS).map((s) => (
+      {keys.map((s) => (
         <button
           key={s}
           onClick={() => onPick(s)}
