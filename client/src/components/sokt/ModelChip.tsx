@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useModel } from "../../hooks/ModelContext";
 
 const installedSeed = [
   { name: "qwen2.5:7b", size: "4.4 GB" },
@@ -70,7 +71,7 @@ const KINDS = ["all", "chat", "code", "image gen", "audio"] as const;
 const SOURCES = ["all", "ollama", "huggingface"] as const;
 
 export function ModelChip() {
-  const [active, setActive] = useState<string>("no model selected");
+  const { activeModel: active, setActiveModel: setActive } = useModel();
   const [installed, setInstalled] = useState<any[]>([]);
   const unload = () => setActive("no model selected");
   useEffect(() => {

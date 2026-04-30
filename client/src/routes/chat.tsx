@@ -12,6 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useModel } from "../hooks/ModelContext";
 
 export const Route = createFileRoute("/chat")({
   component: ChatPage,
@@ -32,6 +33,7 @@ const PROMPT_SNIPPETS: Record<string, string> = {
 };
 
 function ChatPage() {
+  const { activeModel } = useModel();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,7 +76,7 @@ function ChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "llama3.2:3b", // Replace this with your actual selected model state!
+          model: activeModel,
           messages: chatHistory,
         }),
       });
